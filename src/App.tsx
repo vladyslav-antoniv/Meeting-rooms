@@ -12,6 +12,7 @@ import { CreateRoomPage } from "./features/rooms/CreateRoomPage";
 import { RoomsList } from "./features/rooms/RoomsList";
 import { RoomDetailsPage } from "./features/bookings/RoomDetailsPage";
 import { MyBookingsPage } from "./features/bookings/MyBookingsPage";
+import { EditRoomPage } from "./features/rooms/EditRoomPage";
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAppSelector((state) => state.auth);
@@ -67,6 +68,14 @@ function App() {
           element={
             <ProtectedRoute>
               <MyBookingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/rooms/:id/edit"
+          element={
+            <ProtectedRoute>
+              <EditRoomPage />
             </ProtectedRoute>
           }
         />

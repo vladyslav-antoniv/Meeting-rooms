@@ -1,64 +1,43 @@
-import { useEffect, useState } from 'react';
-import { collection, query, where, getDocs, deleteDoc, doc } from 'firebase/firestore';
-import { db, auth } from '../../config/firebase';
-import { type Booking } from '../../types';
+import { useEffect } from 'react';
+import { useAppDispatch, useAppSelector } from '../../app/hooks';
+import { fetchUserBookings, cancelBooking } from './bookingsSlice';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { Link } from 'react-router-dom';
 import { Trash2, CalendarClock } from 'lucide-react';
 
 export const MyBookingsPage = () => {
-  const [bookings, setBookings] = useState<Booking[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchMyBookings = async () => {
-    if (!auth.currentUser) return;
-    try {
-      const q = query(
-        collection(db, "bookings"), 
-        where("userId", "==", auth.currentUser.uid)
-      );
-      
-      const querySnapshot = await getDocs(q);
-      const data = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Booking[];
-
-      data.sort((a, b) => a.startTime.seconds - b.startTime.seconds);
-
-      setBookings(data);
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to load bookings");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const dispatch = useAppDispatch();
+  const { user } = useAppSelector(state => state.auth);
+  
+  const { items: bookings, status } = useAppSelector(state => state.bookings);
 
   useEffect(() => {
-    fetchMyBookings();
-  }, []);
+    if (user) {
+      dispatch(fetchUserBookings(user.uid));
+    }
+  }, [user, dispatch]);
 
   const handleCancel = async (bookingId: string) => {
     if (!window.confirm("Cancel this meeting?")) return;
 
     try {
-      await deleteDoc(doc(db, "bookings", bookingId));
+      await dispatch(cancelBooking(bookingId)).unwrap();
       toast.success("Booking cancelled");
-      fetchMyBookings();
     } catch (error) {
       toast.error("Error cancelling booking");
     }
   };
 
-  if (loading) return <div className="p-8">Loading...</div>;
+  if (status === 'loading') return <div className="p-8">Loading...</div>;
+
+  const sortedBookings = [...bookings].sort((a, b) => a.startTime.seconds - b.startTime.seconds);
 
   return (
     <div className="max-w-4xl mx-auto p-8">
-      <h1 className="text-2xl font-bold mb-6 text-gray-800">My Bookings</h1>
+      <h1 className="text-2xl font-bold mb-6 text-gray-800">My Bookings 📅</h1>
 
-      {bookings.length === 0 ? (
+      {sortedBookings.length === 0 ? (
         <div className="bg-white p-8 rounded-lg shadow text-center text-gray-500">
           <p>You haven't booked any rooms yet.</p>
           <Link to="/" className="text-blue-600 hover:underline mt-2 inline-block">
@@ -67,7 +46,7 @@ export const MyBookingsPage = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {bookings.map((booking) => (
+          {sortedBookings.map((booking) => (
             <div key={booking.id} className="bg-white p-6 rounded-lg shadow-sm border flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-lg text-blue-900">{booking.title}</h3>

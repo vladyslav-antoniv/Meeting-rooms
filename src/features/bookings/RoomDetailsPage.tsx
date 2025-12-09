@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { doc, getDoc, collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
-import type { Room, Booking } from '../../types';
-import { useAppSelector } from '../../app/hooks';
+import { type Room } from '../../types';
+import { useAppSelector, useAppDispatch } from '../../app/hooks';
+import { fetchBookingsForRoom, addBooking, clearBookings } from './bookingsSlice';
 import toast from 'react-hot-toast';
 import { checkOverlap } from '../../utils/bookingUtils';
 import { format } from 'date-fns';
@@ -11,10 +12,12 @@ import { format } from 'date-fns';
 export const RoomDetailsPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const dispatch = useAppDispatch();
   const { user } = useAppSelector(state => state.auth);
+  
+  const { items: bookings } = useAppSelector(state => state.bookings);
 
   const [room, setRoom] = useState<Room | null>(null);
-  const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -25,6 +28,7 @@ export const RoomDetailsPage = () => {
   useEffect(() => {
     const fetchData = async () => {
       if (!id) return;
+      
       try {
         const roomSnap = await getDoc(doc(db, "rooms", id));
         if (roomSnap.exists()) {
@@ -33,21 +37,19 @@ export const RoomDetailsPage = () => {
           toast.error("Room not found");
           navigate('/');
         }
-
-        const q = query(collection(db, "bookings"), where("roomId", "==", id));
-        const bookingSnap = await getDocs(q);
-        const bookingsData = bookingSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Booking[];
-        setBookings(bookingsData);
-
-      } catch (error) {
-        console.error(error);
-        toast.error("Error loading data");
+      } catch (e) {
+        toast.error("Error loading room info");
       } finally {
         setLoading(false);
       }
+
+      dispatch(fetchBookingsForRoom(id));
     };
+
     fetchData();
-  }, [id, navigate]);
+
+    return () => { dispatch(clearBookings()); }
+  }, [id, navigate, dispatch]);
 
   const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,21 +65,19 @@ export const RoomDetailsPage = () => {
 
     const hasConflict = checkOverlap(startDateTime, endDateTime, bookings);
     if (hasConflict) {
-      toast.error("This time slot is already booked! Please choose another time.");
+      toast.error("⚠️ This time slot is already booked!");
       return;
     }
 
     try {
-      const newBooking = {
+      await dispatch(addBooking({
         roomId: id,
         userId: user.uid,
         userName: user.displayName || user.email || 'User',
         title,
         startTime: Timestamp.fromDate(startDateTime),
         endTime: Timestamp.fromDate(endDateTime)
-      };
-
-      await addDoc(collection(db, "bookings"), newBooking);
+      })).unwrap();
       
       toast.success("Room booked successfully!");
       navigate('/');
@@ -108,53 +108,23 @@ export const RoomDetailsPage = () => {
           <form onSubmit={handleBooking} className="space-y-4">
             <div>
               <label className="block text-sm font-medium">Date</label>
-              <input 
-                type="date" 
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full border p-2 rounded"
-                required
-              />
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border p-2 rounded" required />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium">Start Time</label>
-                <input 
-                  type="time" 
-                  value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  className="w-full border p-2 rounded"
-                  required
-                />
+                <label className="block text-sm font-medium">Start</label>
+                <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full border p-2 rounded" required />
               </div>
               <div>
-                <label className="block text-sm font-medium">End Time</label>
-                <input 
-                  type="time" 
-                  value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                  className="w-full border p-2 rounded"
-                  required
-                />
+                <label className="block text-sm font-medium">End</label>
+                <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full border p-2 rounded" required />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium">Meeting Title</label>
-              <input 
-                type="text" 
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Project Sync"
-                className="w-full border p-2 rounded"
-                required
-              />
+              <label className="block text-sm font-medium">Title</label>
+              <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full border p-2 rounded" required />
             </div>
-            <button 
-              type="submit" 
-              className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
-            >
-              Confirm Booking
-            </button>
+            <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Confirm Booking</button>
           </form>
         </div>
 
@@ -166,9 +136,7 @@ export const RoomDetailsPage = () => {
             <ul className="space-y-3">
               {todaysBookings.map(b => (
                 <li key={b.id} className="bg-white p-3 rounded shadow-sm border-l-4 border-red-500">
-                  <div className="font-bold">
-                    {format(b.startTime.toDate(), 'HH:mm')} - {format(b.endTime.toDate(), 'HH:mm')}
-                  </div>
+                  <div className="font-bold">{format(b.startTime.toDate(), 'HH:mm')} - {format(b.endTime.toDate(), 'HH:mm')}</div>
                   <div className="text-gray-600">{b.title}</div>
                   <div className="text-xs text-gray-400">by {b.userName}</div>
                 </li>
